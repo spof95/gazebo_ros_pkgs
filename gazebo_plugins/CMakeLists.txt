@@ -29,6 +29,7 @@ find_package(catkin REQUIRED COMPONENTS
   camera_info_manager
   std_msgs
   visualization_msgs
+  tf2_sensor_msgs
 )
 
 # Through transitive dependencies in the packages above, gazebo_plugins depends

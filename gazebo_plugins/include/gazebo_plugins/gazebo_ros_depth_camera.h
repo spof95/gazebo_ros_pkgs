@@ -37,6 +37,8 @@
 #include <image_transport/image_transport.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <visualization_msgs/Marker.h>
+#include <geometry_msgs/Transform.h>
+#include <geometry_msgs/TransformStamped.h>
 
 // gazebo stuff
 #include <sdf/Param.hh>
@@ -188,7 +190,11 @@ namespace gazebo
     protected: ros::Publisher depth_image_camera_info_pub_;
 
     private: event::ConnectionPtr load_connection_;
-  };
+    private: geometry_msgs::Transform tf_;
+    std::string pointCloudFrameName_;
+    std::string depthImageFrameName_;
+
+    };
 
 }
 #endif

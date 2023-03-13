@@ -38,6 +38,7 @@
 #include <sensor_msgs/point_cloud2_iterator.h>
 
 #include <tf/tf.h>
+#include <tf2_sensor_msgs/tf2_sensor_msgs.h>
 
 namespace gazebo
 {
@@ -138,6 +139,38 @@ void GazeboRosDepthCamera::Load(sensors::SensorPtr _parent, sdf::ElementPtr _sdf
     this->use_depth_image_16UC1_format_ = false;
   else
     this->use_depth_image_16UC1_format_ = _sdf->GetElement("useDepth16UC1Format")->Get<bool>();
+
+    if (!_sdf->HasElement("cameraFrameToPointCloudFrame"))
+        tf_ = geometry_msgs::Transform();
+    else {
+        auto trafostring = _sdf->GetElement("cameraFrameToPointCloudFrame")->Get<std::string>();
+        std::vector<double> pose;
+        std::string token;
+        while (token != trafostring) {
+            token = trafostring.substr(0, trafostring.find_first_of(' '));
+            pose.push_back(std::stod(token));
+            trafostring = trafostring.substr(trafostring.find_first_of(' ') + 1);
+        }
+        tf_.translation.x = pose[0];
+        tf_.translation.y = pose[1];
+        tf_.translation.z = pose[2];
+
+        ignition::math::Quaterniond q = ignition::math::Quaterniond::EulerToQuaternion(pose[3], pose[4], pose[5]);
+        tf_.rotation.x = q.X();
+        tf_.rotation.y = q.Y();
+        tf_.rotation.z = q.Z();
+        tf_.rotation.w = q.W();
+    }
+
+    if (!_sdf->HasElement("pointCloudFrameName"))
+        pointCloudFrameName_ = frame_name_;
+    else
+        pointCloudFrameName_ = _sdf->GetElement("pointCloudFrameName")->Get<std::string>();
+
+    if (!_sdf->HasElement("depthImageFrameName"))
+        depthImageFrameName_ = frame_name_;
+    else
+        depthImageFrameName_ = _sdf->GetElement("depthImageFrameName")->Get<std::string>();
 
   load_connection_ = GazeboRosCameraUtils::OnLoad(boost::bind(&GazeboRosDepthCamera::Advertise, this));
   GazeboRosCameraUtils::Load(_parent, _sdf);
@@ -363,23 +396,25 @@ void GazeboRosDepthCamera::OnNewRGBPointCloud(const float *_pcd,
 
       memcpy(pcd_, _pcd, sizeof(float)* _width * _height * 4);
 
-      this->point_cloud_msg_.header.frame_id = this->frame_name_;
-      this->point_cloud_msg_.header.stamp.sec = this->depth_sensor_update_time_.sec;
-      this->point_cloud_msg_.header.stamp.nsec = this->depth_sensor_update_time_.nsec;
-      this->point_cloud_msg_.width = this->width;
-      this->point_cloud_msg_.height = this->height;
-      this->point_cloud_msg_.row_step = this->point_cloud_msg_.point_step * this->width;
+      sensor_msgs::PointCloud2 pointCloud;
+      
+      pointCloud.header.frame_id = this->frame_name_;
+      pointCloud.header.stamp.sec = this->depth_sensor_update_time_.sec;
+      pointCloud.header.stamp.nsec = this->depth_sensor_update_time_.nsec;
+      pointCloud.width = this->width;
+      pointCloud.height = this->height;
+      pointCloud.row_step = pointCloud.point_step * this->width;
 
-      sensor_msgs::PointCloud2Modifier pcd_modifier(point_cloud_msg_);
+      sensor_msgs::PointCloud2Modifier pcd_modifier(pointCloud);
       pcd_modifier.setPointCloud2FieldsByString(2, "xyz", "rgb");
       pcd_modifier.resize(_width*_height);
 
-      point_cloud_msg_.is_dense = true;
+      pointCloud.is_dense = true;
 
-      sensor_msgs::PointCloud2Iterator<float> iter_x(point_cloud_msg_, "x");
-      sensor_msgs::PointCloud2Iterator<float> iter_y(point_cloud_msg_, "y");
-      sensor_msgs::PointCloud2Iterator<float> iter_z(point_cloud_msg_, "z");
-      sensor_msgs::PointCloud2Iterator<float> iter_rgb(point_cloud_msg_, "rgb");
+      sensor_msgs::PointCloud2Iterator<float> iter_x(pointCloud, "x");
+      sensor_msgs::PointCloud2Iterator<float> iter_y(pointCloud, "y");
+      sensor_msgs::PointCloud2Iterator<float> iter_z(pointCloud, "z");
+      sensor_msgs::PointCloud2Iterator<float> iter_rgb(pointCloud, "rgb");
 
       for (unsigned int i = 0; i < _width; i++)
       {
@@ -393,7 +428,14 @@ void GazeboRosDepthCamera::OnNewRGBPointCloud(const float *_pcd,
         }
       }
 
-      this->point_cloud_pub_.publish(this->point_cloud_msg_);
+        geometry_msgs::TransformStamped tf;
+        tf.header.frame_id = pointCloudFrameName_;
+        tf.child_frame_id = frame_name_;
+        tf.transform = tf_;
+
+        tf2::doTransform(pointCloud, point_cloud_msg_, tf);
+
+      this->point_cloud_pub_.publish(point_cloud_msg_);
       this->lock_.unlock();
     }
   }
@@ -581,21 +623,29 @@ void GazeboRosDepthCamera::FillPointdCloud(const float *_src)
 {
   this->lock_.lock();
 
-  this->point_cloud_msg_.header.frame_id = this->frame_name_;
-  this->point_cloud_msg_.header.stamp.sec = this->depth_sensor_update_time_.sec;
-  this->point_cloud_msg_.header.stamp.nsec = this->depth_sensor_update_time_.nsec;
-  this->point_cloud_msg_.width = this->width;
-  this->point_cloud_msg_.height = this->height;
-  this->point_cloud_msg_.row_step = this->point_cloud_msg_.point_step * this->width;
+  sensor_msgs::PointCloud2 pointCloud;
+  pointCloud.header.frame_id = this->frame_name_;
+  pointCloud.header.stamp.sec = this->depth_sensor_update_time_.sec;
+  pointCloud.header.stamp.nsec = this->depth_sensor_update_time_.nsec;
+  pointCloud.width = this->width;
+  pointCloud.height = this->height;
+  pointCloud.row_step = pointCloud.point_step * this->width;
 
   ///copy from depth to point cloud message
-  FillPointCloudHelper(this->point_cloud_msg_,
+  FillPointCloudHelper(pointCloud,
                  this->height,
                  this->width,
                  this->skip_,
                  (void*)_src );
 
-  this->point_cloud_pub_.publish(this->point_cloud_msg_);
+  geometry_msgs::TransformStamped tf;
+  tf.header.frame_id = pointCloudFrameName_;
+  tf.child_frame_id = frame_name_;
+  tf.transform = tf_;
+
+  tf2::doTransform(pointCloud, point_cloud_msg_, tf);
+
+  this->point_cloud_pub_.publish(point_cloud_msg_);
 
   this->lock_.unlock();
 }
@@ -633,10 +683,10 @@ bool GazeboRosDepthCamera::FillPointCloudHelper(
   pcd_modifier.setPointCloud2FieldsByString(2, "xyz", "rgb");
   pcd_modifier.resize(rows_arg*cols_arg);
 
-  sensor_msgs::PointCloud2Iterator<float> iter_x(point_cloud_msg_, "x");
-  sensor_msgs::PointCloud2Iterator<float> iter_y(point_cloud_msg_, "y");
-  sensor_msgs::PointCloud2Iterator<float> iter_z(point_cloud_msg_, "z");
-  sensor_msgs::PointCloud2Iterator<uint8_t> iter_rgb(point_cloud_msg_, "rgb");
+  sensor_msgs::PointCloud2Iterator<float> iter_x(point_cloud_msg, "x");
+  sensor_msgs::PointCloud2Iterator<float> iter_y(point_cloud_msg, "y");
+  sensor_msgs::PointCloud2Iterator<float> iter_z(point_cloud_msg, "z");
+  sensor_msgs::PointCloud2Iterator<uint8_t> iter_rgb(point_cloud_msg, "rgb");
 
   point_cloud_msg.is_dense = true;
 
