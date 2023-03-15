@@ -129,6 +129,11 @@ void GazeboRosDepthCamera::Load(sensors::SensorPtr _parent, sdf::ElementPtr _sdf
   else
     this->point_cloud_cutoff_ = _sdf->GetElement("pointCloudCutoff")->Get<double>();
 
+if (!_sdf->HasElement("maxDepth"))
+    this->maxDepth_= 100;
+else
+    this->maxDepth_ = _sdf->GetElement("maxDepth")->Get<double>();
+
   if (!_sdf->HasElement("reduceNormals"))
     this->reduce_normals_ = 50;
   else
@@ -722,7 +727,7 @@ bool GazeboRosDepthCamera::FillPointCloudHelper(
       unsigned int index = (j * cols_arg) + i;
       *iter_x      = depth * tan(yAngle);
       *iter_y      = depth * tan(pAngle);
-      if(depth > this->point_cloud_cutoff_)
+      if(depth > this->point_cloud_cutoff_ && depth < maxDepth_)
       {
         *iter_z    = depth;
         pcd_[4 * index + 2] = *iter_z;
@@ -809,7 +814,7 @@ bool GazeboRosDepthCamera::FillDepthImageHelper(
     {
       float depth = toCopyFrom[index++];
 
-      if (depth > this->point_cloud_cutoff_)
+      if (depth > this->point_cloud_cutoff_ && depth < maxDepth_)
       {
         if (!this->use_depth_image_16UC1_format_)
           dest.dest_float[i + j * cols_arg] = depth;

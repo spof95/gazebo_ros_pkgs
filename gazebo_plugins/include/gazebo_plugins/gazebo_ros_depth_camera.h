@@ -193,6 +193,7 @@ namespace gazebo
     private: geometry_msgs::Transform tf_;
     std::string pointCloudFrameName_;
     std::string depthImageFrameName_;
+    double maxDepth_ = 100;
 
     };
 
